@@ -1,0 +1,10 @@
+# Build output and local secrets
+/target/
+/config.yml
+/config.real-test.yml
+/config.test.yml
+/logs/
+*.db
+config.db
+api-key.json
+.env

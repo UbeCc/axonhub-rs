@@ -1,0 +1,39 @@
+# Example gateway configuration.  Copy to config.yml, fill in credentials and
+# chmod 600.  config.yml is ignored by git.
+listen: 127.0.0.1:8090
+# Client credentials accepted by this gateway.  Empty = accept anything, which
+# is only acceptable while bound to loopback.
+api_keys:
+  - ${CLIENT_API_KEY}
+# Fail over to the next eligible channel after a retryable upstream error.
+max_attempts: 3
+connect_timeout_secs: 10
+# Whole-request budget (streaming responses included).
+request_timeout_secs: 1800
+# Anthropic requires max_tokens; used when an OpenAI request omits it.
+default_max_tokens: 4096
+# One structured line per request on stderr.  Off by default: no durable work.
+log_requests: false
+
+channels:
+  - name: primary
+    base_url: https://api.example.com/anthropic
+    api_key: ${PRIMARY_UPSTREAM_KEY}
+    auth: x-api-key
+    models:
+      - claude-sonnet-4-5
+    mappings:
+      - from: claude-sonnet-latest
+        to: claude-sonnet-4-5
+    hide_mapped_models: true
+    priority: 200
+    pass_through_user_agent: true
+    pass_through_body: true
+
+  - name: fallback
+    base_url: https://api.example.com/anthropic
+    api_key: ${PRIMARY_UPSTREAM_KEY}-too
+    auth: x-api-key
+    models:
+      - claude-sonnet-4-5
+    priority: 1
