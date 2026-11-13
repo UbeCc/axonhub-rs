@@ -1,6 +1,8 @@
 # Build output and local secrets
 /target/
 /config.yml
+/config.*.yml
+!/config.example.yml
 /config.real-test.yml
 /config.test.yml
 /logs/
