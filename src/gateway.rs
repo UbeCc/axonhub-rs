@@ -86,7 +86,12 @@ fn build_client(config: &Config) -> reqwest::Client {
         .pool_idle_timeout(Duration::from_secs(90))
         .pool_max_idle_per_host(64)
         .tcp_nodelay(true)
-        .http2_adaptive_window(true)
+        // HTTP/1.1 only: long-lived multiplexed h2 connections to the
+        // upstreams wedge under load (kernel Recv-Q grows, the connection
+        // stops being read, and every request multiplexed on it hangs,
+        // including brand-new ones that reuse it from the pool). On h1 a
+        // wedged stream only blocks itself. Revisit only with a reproducer.
+        .http1_only()
         .build()
         .expect("build upstream HTTP client")
 }
