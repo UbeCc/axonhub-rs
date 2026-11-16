@@ -51,6 +51,15 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let listen = config.listen.clone();
+    if config.api_keys.is_empty() {
+        tracing::warn!(
+            listen = %listen,
+            "no api_keys configured: every endpoint accepts unauthenticated requests; \
+             only acceptable while the listener is loopback-only"
+        );
+    } else if config.admin_api_keys.is_empty() {
+        tracing::info!("admin endpoints accept the client api_keys (admin_api_keys is empty)");
+    }
     tracing::info!(%listen, config = %config_path.display(), channels = config.channels.len(), "gateway starting");
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

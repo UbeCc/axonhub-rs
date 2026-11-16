@@ -124,6 +124,10 @@ pub struct Config {
     /// (only sensible when bound to loopback).
     #[serde(default)]
     pub api_keys: Vec<String>,
+    /// Credentials accepted on `/admin/*`.  Empty falls back to `api_keys`; when both are
+    /// empty the admin endpoints are open, which the gateway only allows on loopback.
+    #[serde(default)]
+    pub admin_api_keys: Vec<String>,
     #[serde(default = "default_max_attempts")]
     pub max_attempts: usize,
     #[serde(default = "default_connect_timeout")]
@@ -171,6 +175,15 @@ fn expand_env(value: &str) -> String {
 }
 
 impl Config {
+    /// Keys accepted on `/admin/*`: a dedicated list when configured, otherwise the client keys.
+    pub fn admin_keys(&self) -> &[String] {
+        if self.admin_api_keys.is_empty() {
+            &self.api_keys
+        } else {
+            &self.admin_api_keys
+        }
+    }
+
     pub fn load(path: &Path) -> Result<Arc<Config>> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("read gateway config {}", path.display()))?;

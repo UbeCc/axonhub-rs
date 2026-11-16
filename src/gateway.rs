@@ -539,13 +539,21 @@ fn retryable(status: StatusCode) -> bool {
     )
 }
 
+fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), AuthError> {
+    authorize_keys(&config.api_keys, headers)
+}
+
+fn authorize_admin(config: &Config, headers: &HeaderMap) -> Result<(), AuthError> {
+    authorize_keys(config.admin_keys(), headers)
+}
+
 enum AuthError {
     Missing,
     Invalid,
 }
 
-fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), AuthError> {
-    if config.api_keys.is_empty() {
+fn authorize_keys(keys: &[String], headers: &HeaderMap) -> Result<(), AuthError> {
+    if keys.is_empty() {
         return Ok(());
     }
     let presented = headers
@@ -561,8 +569,7 @@ fn authorize(config: &Config, headers: &HeaderMap) -> Result<(), AuthError> {
         return Err(AuthError::Missing);
     };
     let presented = presented.as_bytes();
-    let authorized = config
-        .api_keys
+    let authorized = keys
         .iter()
         .any(|key| constant_time_eq(key.as_bytes(), presented));
     if authorized {
@@ -628,8 +635,11 @@ async fn handle_health(State(state): State<Arc<AppState>>) -> Response {
     )
 }
 
-async fn handle_admin_status(State(state): State<Arc<AppState>>) -> Response {
+async fn handle_admin_status(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let config = state.snapshot();
+    if let Err(error) = authorize_admin(&config, &headers) {
+        return auth_error(error);
+    }
     json_response(
         StatusCode::OK,
         json!({
@@ -645,8 +655,11 @@ async fn handle_admin_status(State(state): State<Arc<AppState>>) -> Response {
     )
 }
 
-async fn handle_admin_routes(State(state): State<Arc<AppState>>) -> Response {
+async fn handle_admin_routes(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let config = state.snapshot();
+    if let Err(error) = authorize_admin(&config, &headers) {
+        return auth_error(error);
+    }
     let channels: Vec<Value> = config
         .channels
         .iter()
@@ -668,7 +681,10 @@ async fn handle_admin_routes(State(state): State<Arc<AppState>>) -> Response {
     )
 }
 
-async fn handle_reload(State(state): State<Arc<AppState>>) -> Response {
+async fn handle_reload(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if let Err(error) = authorize_admin(&state.snapshot(), &headers) {
+        return auth_error(error);
+    }
     match state.reload() {
         Ok(()) => json_response(StatusCode::OK, json!({"reloaded": true})),
         Err(error) => json_response(
@@ -686,8 +702,11 @@ async fn handle_metrics(State(state): State<Arc<AppState>>) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-async fn handle_models(State(state): State<Arc<AppState>>) -> Response {
+async fn handle_models(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
     let config = state.snapshot();
+    if let Err(error) = authorize(&config, &headers) {
+        return auth_error(error);
+    }
     let created = 1_700_000_000u64;
     let data: Vec<Value> = config
         .public_models()
@@ -695,4 +714,63 @@ async fn handle_models(State(state): State<Arc<AppState>>) -> Response {
         .map(|model| json!({"id": model, "object": "model", "created": created, "owned_by": "axonhub-rs"}))
         .collect();
     json_response(StatusCode::OK, json!({"object": "list", "data": data}))
+}
+
+#[cfg(test)]
+mod auth_tests {
+    use super::*;
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(
+                HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                HeaderValue::from_str(value).unwrap(),
+            );
+        }
+        map
+    }
+
+    fn keys(list: &[&str]) -> Vec<String> {
+        list.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn missing_and_invalid_credentials_are_rejected() {
+        let known = keys(&["k1"]);
+        assert!(matches!(
+            authorize_keys(&known, &HeaderMap::new()),
+            Err(AuthError::Missing)
+        ));
+        assert!(matches!(
+            authorize_keys(&known, &headers(&[("x-api-key", "nope")])),
+            Err(AuthError::Invalid)
+        ));
+    }
+
+    #[test]
+    fn x_api_key_and_bearer_are_both_accepted() {
+        let known = keys(&["k1", "k2"]);
+        assert!(authorize_keys(&known, &headers(&[("x-api-key", "k2")])).is_ok());
+        assert!(authorize_keys(&known, &headers(&[("authorization", "Bearer k1")])).is_ok());
+        assert!(authorize_keys(&known, &headers(&[("authorization", "Basic k1")])).is_err());
+    }
+
+    #[test]
+    fn an_empty_key_list_leaves_the_endpoint_open() {
+        assert!(authorize_keys(&[], &HeaderMap::new()).is_ok());
+    }
+
+    #[test]
+    fn admin_keys_fall_back_to_the_client_keys() {
+        let mut config: Config =
+            serde_yaml::from_str("listen: 127.0.0.1:0\napi_keys: [client]\nchannels: []\n")
+                .unwrap();
+        assert_eq!(config.admin_keys(), ["client".to_string()].as_slice());
+
+        config.admin_api_keys = vec!["admin".to_string()];
+        assert_eq!(config.admin_keys(), ["admin".to_string()].as_slice());
+        assert!(authorize_admin(&config, &headers(&[("x-api-key", "client")])).is_err());
+        assert!(authorize_admin(&config, &headers(&[("x-api-key", "admin")])).is_ok());
+    }
 }
