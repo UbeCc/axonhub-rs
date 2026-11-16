@@ -5,6 +5,10 @@ listen: 127.0.0.1:8090
 # is only acceptable while bound to loopback.
 api_keys:
   - ${CLIENT_API_KEY}
+# Credentials for /admin/*.  Empty means the admin endpoints accept the client
+# keys above; keep this separate when humans should not reuse a client key.
+# admin_api_keys:
+#   - ${ADMIN_API_KEY}
 # Fail over to the next eligible channel after a retryable upstream error.
 max_attempts: 3
 connect_timeout_secs: 10

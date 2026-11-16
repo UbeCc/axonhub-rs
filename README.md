@@ -66,19 +66,27 @@ python3 scripts/import-sqlite.py --seed /path/to/config.db \
 bash scripts/start-tmux.sh
 ```
 
-The listener is loopback-only by default. Put authentication in front of it or
-bind it to a private interface only.
+The listener is loopback-only by default. Client requests (`/v1/*`,
+`/anthropic/*`) need one of `api_keys`; admin requests (`/admin/status`,
+`/admin/routes`, `/admin/reload`) need one of `admin_api_keys`, which falls back
+to `api_keys` when unset. `/health`, `/healthz` and `/admin/system/status`
+stay open so process supervisors and cutover scripts can probe liveness.
 
 ## Operations
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /admin/system/status` | Liveness, version, uptime (same shape the old supervisor probes). |
-| `GET /admin/status` | Channel/model counts and in-memory counters. |
-| `GET /admin/routes` | Effective channel table, without credentials. |
-| `POST /admin/reload` | Re-read `config.yml`; invalid config is rejected and the old one stays active. |
-| `GET /metrics` | Prometheus text format. |
-| `GET /health` | Plain liveness. |
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /admin/system/status` | none | Liveness, version, uptime (same shape the old supervisor probes). |
+| `GET /admin/status` | admin key | Channel/model counts and in-memory counters. |
+| `GET /admin/routes` | admin key | Effective channel table, without credentials. |
+| `POST /admin/reload` | admin key | Re-read `config.yml`; invalid config is rejected and the old one stays active. |
+| `GET /v1/models`, `GET /anthropic/v1/models` | client key | Advertised model list. |
+| `GET /metrics` | none | Prometheus text format (bind loopback or filter at the proxy). |
+| `GET /health`, `GET /healthz` | none | Plain liveness. |
+
+Keys are accepted as `x-api-key: <key>` or `Authorization: Bearer <key>` and
+compared in constant time. An empty key list leaves that surface open, which the
+gateway logs about at startup — only do it while the listener is loopback-only.
 
 Send `SIGHUP` for the same reload from a service manager.
 
